@@ -1,43 +1,102 @@
-name: CI Pipeline
+name: CI React Node
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
 
 jobs:
-  build:
+  frontend:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v3
+      - name: Récupérer le code du dépôt
+        uses: actions/checkout@v4
 
-    # FRONTEND
-    - name: Install frontend
-      run: |
-        cd frontend
-        npm install
+      - name: Installer Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
 
-    - name: Build frontend
-      run: |
-        cd frontend
-        npm run build || true
+      - name: Mettre en cache les dépendances npm du frontend
+        uses: actions/cache@v3
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-frontend-${{ hashFiles('frontend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-frontend-
 
-    # BACKEND
-    - name: Install backend
-      run: |
-        cd backend
-        npm install
+      - name: Installer les dépendances du frontend
+        run: |
+          cd frontend
+          npm ci
 
-    - name: Run backend
-      run: |
-        cd backend
-        node index.js &
-        sleep 5
+      - name: Lancer ESLint sur le frontend
+        run: |
+          cd frontend
+          npm run lint
 
-    # DOCKER
-    - name: Build frontend Docker
-      run: docker build -t frontend ./frontend || true
+      - name: Exécuter les tests frontend avec couverture
+        run: |
+          cd frontend
+          npm test -- --watchAll=false --coverage
 
-    - name: Build backend Docker
-      run: docker build -t backend ./backend || true
+      - name: Construire l’application React
+        run: |
+          cd frontend
+          npm run build
+
+      - name: Construire l’image Docker du frontend
+        run: |
+          docker build -t frontend-app:latest ./frontend
+
+
+  backend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Récupérer le code du dépôt
+        uses: actions/checkout@v4
+
+      - name: Installer Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Mettre en cache les dépendances npm du backend
+        uses: actions/cache@v3
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-backend-${{ hashFiles('backend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-backend-
+
+      - name: Installer les dépendances du backend
+        run: |
+          cd backend
+          npm ci
+
+      - name: Lancer ESLint sur le backend
+        run: |
+          cd backend
+          npm run lint
+
+      - name: Exécuter les tests backend avec couverture
+        run: |
+          cd backend
+          npm test -- --coverage
+
+      - name: Analyse SonarQube / SonarCloud
+        run: |
+          npx sonar-scanner
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Construire l’image Docker du backend
+        run: |
+          docker build -t backend-app:latest ./backend
